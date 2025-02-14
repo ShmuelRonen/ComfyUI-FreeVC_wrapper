@@ -56,12 +56,6 @@ Download the speaker encoder checkpoint from [HuggingFace](https://huggingface.c
 Direct download link:
 - [pretrained_bak_5805000.pt](https://huggingface.co/spaces/OlaWod/FreeVC/resolve/main/speaker_encoder/ckpt/pretrained_bak_5805000.pt)
 
-4. Set up config files:
-
-The corresponding config files should be placed in `custom_nodes/ComfyUI-FreeVC_wrapper/freevc/configs`:
-- `freevc.json`
-- `freevc-s.json`
-- `freevc-24.json`
 
 ## Usage
 
