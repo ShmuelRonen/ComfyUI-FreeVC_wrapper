@@ -13,9 +13,9 @@ if freevc_dir not in sys.path:
     sys.path.append(freevc_dir)
 
 # Import FreeVC modules
-from freevc.models import SynthesizerTrn
-from freevc.mel_processing import mel_spectrogram_torch
-from freevc.speaker_encoder.voice_encoder import SpeakerEncoder
+from models import SynthesizerTrn
+from mel_processing import mel_spectrogram_torch
+from speaker_encoder.voice_encoder import SpeakerEncoder
 
 # Local utils functions to replace the original
 def load_config(config_path):
