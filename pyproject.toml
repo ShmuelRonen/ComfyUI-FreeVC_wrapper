@@ -1,0 +1,15 @@
+[project]
+name = "freevc_wrapper"
+description = "A voice conversion extension node for ComfyUI based on [a/FreeVC](https://github.com/OlaWod/FreeVC), enabling high-quality voice conversion capabilities within the ComfyUI framework."
+version = "1.0.0"
+license = {file = "LICENSE"}
+dependencies = ["librosa", "transformers", "torch", "scipy", "numpy"]
+
+[project.urls]
+Repository = "https://github.com/ShmuelRonen/ComfyUI-FreeVC_wrapper"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "ComfyUI-FreeVC_wrapper"
+Icon = ""
