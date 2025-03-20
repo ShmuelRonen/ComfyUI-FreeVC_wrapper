@@ -1,5 +1,10 @@
 # ComfyUI-FreeVC_wrapper
 
+## Support My Work
+If you find this project helpful, consider buying me a coffee:
+
+[![Buy Me A Coffee](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=&slug=shmuelronen&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff)](https://buymeacoffee.com/shmuelronen)
+
 A voice conversion extension node for ComfyUI based on [FreeVC](https://github.com/OlaWod/FreeVC), enabling high-quality voice conversion capabilities within the ComfyUI framework.
 
 ![image](https://github.com/user-attachments/assets/f4d2ef79-7910-4064-9813-3a628d589284)
