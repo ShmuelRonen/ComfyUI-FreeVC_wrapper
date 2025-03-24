@@ -5,7 +5,16 @@ import torch
 import librosa
 import numpy as np
 from scipy.io.wavfile import write
+from scipy import signal
 from transformers import WavLMModel
+
+# Try to import noisereduce, install if not available
+try:
+    import noisereduce as nr
+except ImportError:
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "noisereduce"])
+    import noisereduce as nr
 
 # Add FreeVC directory to path
 freevc_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "freevc")
@@ -17,7 +26,7 @@ from models import SynthesizerTrn
 from mel_processing import mel_spectrogram_torch
 from speaker_encoder.voice_encoder import SpeakerEncoder
 
-# Local utils functions to replace the original
+# Reuse the existing utility functions
 def load_config(config_path):
     with open(config_path, 'r') as f:
         data = f.read()
@@ -79,11 +88,12 @@ class HParams():
 
 class FreeVCNode:
     def __init__(self):
-        """Initialize FreeVC Node with CUDA if available, otherwise CPU."""
+        """Initialize Enhanced FreeVC Node with improved processing."""
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.models = {}
-        print("FreeVC Node initialized on device:", self.device)
-
+        self.current_model_type = None
+        print("Enhanced FreeVC Node initialized on device:", self.device)
+    
     def load_models(self, model_type):
         """
         Load required models for voice conversion if not already loaded.
@@ -96,7 +106,6 @@ class FreeVCNode:
             
         print(f"Loading {model_type}...")
         try:
-            # Load hparams
             # Handle filenames for different model types
             if model_type == "FreeVC (24kHz)":
                 config_filename = "freevc-24.json"
@@ -145,22 +154,34 @@ class FreeVCNode:
         except Exception as e:
             print(f"Error loading models: {str(e)}")
             raise e
-
-    @classmethod
-    def INPUT_TYPES(s):
-        """Define input types for ComfyUI."""
-        return {
-            "required": {
-                "model_type": (["FreeVC", "FreeVC-s", "FreeVC (24kHz)"],),
-                "source_audio": ("AUDIO",),
-                "reference_audio": ("AUDIO",)
-            }
-        }
-
-    RETURN_TYPES = ("AUDIO",)
-    FUNCTION = "convert_voice"
-    CATEGORY = "audio/voice conversion"
-
+    
+    def _preprocess_audio(self, wav, sr, target_sr, noise_reduction_strength=0.5):
+        """
+        Enhanced preprocessing with noise reduction and VAD
+        """
+        # Apply noise reduction
+        if noise_reduction_strength > 0:
+            try:
+                wav = nr.reduce_noise(y=wav, sr=sr, prop_decrease=noise_reduction_strength)
+            except Exception as e:
+                print(f"Noise reduction failed: {e}, skipping...")
+            
+        # Voice activity detection to focus on speech segments
+        try:
+            intervals = librosa.effects.split(wav, top_db=20)
+            if len(intervals) > 0:  # Only apply if we found speech segments
+                wav_output = np.zeros_like(wav)
+                for interval in intervals:
+                    wav_output[interval[0]:interval[1]] = wav[interval[0]:interval[1]]
+                wav = wav_output
+        except Exception as e:
+            print(f"VAD failed: {e}, using original audio...")
+        
+        # Normalize audio
+        wav = librosa.util.normalize(wav) * 0.95
+        
+        return wav
+        
     def _process_audio(self, audio_data, target_sr, label=""):
         """
         Process audio data: convert to mono if stereo and resample if needed.
@@ -192,38 +213,147 @@ class FreeVCNode:
             wav = librosa.resample(wav, orig_sr=sr, target_sr=target_sr)
         
         return wav
-
-    def convert_voice(self, model_type, source_audio, reference_audio):
+    
+    def _process_multiple_references(self, reference_audios, target_sr, noise_reduction_strength):
         """
-        Convert voice using FreeVC models.
+        Process multiple reference samples to get more robust speaker embedding
+        """
+        if not isinstance(reference_audios, list):
+            reference_audios = [reference_audios]
+            
+        embeddings = []
+        
+        for ref_audio in reference_audios:
+            wav_ref = self._process_audio(ref_audio, target_sr, "reference")
+            wav_ref = self._preprocess_audio(wav_ref, target_sr, target_sr, noise_reduction_strength)
+            
+            # Get embedding for this reference
+            if self.current_model_type in ["FreeVC", "FreeVC (24kHz)"]:
+                ref_embed = self.models[self.current_model_type]['speaker_encoder'].embed_utterance(wav_ref)
+                embeddings.append(ref_embed)
+                
+        # Average the embeddings
+        if embeddings:
+            avg_embed = np.mean(embeddings, axis=0)
+            # Re-normalize the averaged embedding
+            avg_embed = avg_embed / np.linalg.norm(avg_embed, 2)
+            return torch.from_numpy(avg_embed).unsqueeze(0).to(self.device)
+        return None
+    
+    def _apply_post_processing(self, audio, sampling_rate, clarity_enhancement=0.3, normalize_output=True, normalization_level=0.95):
+        """
+        Apply post-processing to enhance the converted voice
         
         Args:
-            model_type (str): Type of FreeVC model to use
-            source_audio (dict): Source audio data
-            reference_audio (dict): Reference audio data
-        
+            audio (numpy.ndarray): Audio data to process
+            sampling_rate (int): Sampling rate of the audio
+            clarity_enhancement (float): Amount of clarity enhancement to apply (0.0-1.0)
+            normalize_output (bool): Whether to normalize the output audio
+            normalization_level (float): Target level for normalization (0.0-1.0)
+            
         Returns:
-            tuple: Tuple containing dictionary with converted audio data
+            numpy.ndarray: Processed audio data
         """
         try:
-            print("Starting voice conversion...")
+            # Gentle noise gate to remove background artifacts
+            threshold = 0.005
+            audio[np.abs(audio) < threshold] = 0
+            
+            # Apply slight EQ to enhance clarity if requested
+            # Simple high-shelf filter to improve intelligibility
+            if clarity_enhancement > 0:
+                b, a = signal.butter(2, 3000/(sampling_rate/2), 'high', analog=False)
+                audio = signal.filtfilt(b, a, audio) * clarity_enhancement + audio * (1-clarity_enhancement)
+                
+            # Apply output normalization if requested
+            if normalize_output:
+                print(f"Normalizing output audio to level: {normalization_level}")
+                # First normalize to [-1, 1]
+                if np.max(np.abs(audio)) > 0:
+                    audio = librosa.util.normalize(audio)
+                    # Then scale to the requested level
+                    audio = audio * normalization_level
+        except Exception as e:
+            print(f"Post-processing failed: {e}, using unprocessed audio...")
+            
+        return audio
+        
+    @classmethod
+    def INPUT_TYPES(s):
+        """Define enhanced input types for ComfyUI."""
+        return {
+            "required": {
+                "model_type": (["FreeVC", "FreeVC-s", "FreeVC (24kHz)"],),
+                "source_audio": ("AUDIO",),
+                "reference_audio": ("AUDIO",)
+            },
+            "optional": {
+                "secondary_reference": ("AUDIO", {"default": None}),
+                "noise_reduction_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.1}),
+                "clarity_enhancement": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 1.0, "step": 0.1}),
+                "temperature": ("FLOAT", {"default": 0.7, "min": 0.1, "max": 1.0, "step": 0.1}),
+                "normalize_output": ("BOOLEAN", {"default": True}),
+                "normalization_level": ("FLOAT", {"default": 0.95, "min": 0.1, "max": 1.0, "step": 0.05})
+            }
+        }
+
+    RETURN_TYPES = ("AUDIO",)
+    FUNCTION = "convert_voice_enhanced"
+    CATEGORY = "audio/voice conversion"
+
+    def convert_voice_enhanced(self, model_type, source_audio, reference_audio, 
+                              secondary_reference=None, noise_reduction_strength=0.5, 
+                              clarity_enhancement=0.3, temperature=0.7,
+                              normalize_output=True, normalization_level=0.95):
+        """
+        Enhanced voice conversion with multiple references and improved processing
+        
+        Args:
+            model_type (str): FreeVC model type to use
+            source_audio (dict): Source audio to convert
+            reference_audio (dict): Reference audio for voice characteristics
+            secondary_reference (dict, optional): Secondary reference for more robust conversion
+            noise_reduction_strength (float): Amount of noise reduction to apply (0.0-1.0)
+            clarity_enhancement (float): Amount of clarity enhancement to apply (0.0-1.0)
+            temperature (float): Temperature for WavLM feature extraction (0.1-1.0)
+            normalize_output (bool): Whether to normalize the output audio
+            normalization_level (float): Target level for normalization (0.0-1.0)
+            
+        Returns:
+            tuple: Audio data in ComfyUI format
+        """
+        try:
+            print("Starting enhanced voice conversion...")
             print(f"Processing with model: {model_type}")
             
+            self.current_model_type = model_type
             self.load_models(model_type)
             print("Models loaded successfully")
             
             with torch.no_grad():
-                # Process reference audio
-                print("Processing reference audio...")
-                wav_tgt = self._process_audio(reference_audio, self.hps.data.sampling_rate, "reference")
-                wav_tgt, _ = librosa.effects.trim(wav_tgt, top_db=20)
+                # Process source audio with enhanced preprocessing
+                print("Processing source audio...")
+                wav_src = self._process_audio(source_audio, self.hps.data.sampling_rate, "source")
+                wav_src = self._preprocess_audio(wav_src, self.hps.data.sampling_rate, 
+                                                self.hps.data.sampling_rate, noise_reduction_strength)
+                wav_src = torch.from_numpy(wav_src).unsqueeze(0).to(self.device)
                 
-                # Handle reference audio based on model type
+                # Create reference list and process reference audio(s)
                 if model_type in ["FreeVC", "FreeVC (24kHz)"]:
-                    print("Computing speaker embedding...")
-                    g_tgt = self.models[model_type]['speaker_encoder'].embed_utterance(wav_tgt)
-                    g_tgt = torch.from_numpy(g_tgt).unsqueeze(0).to(self.device)
+                    # Process reference embeddings
+                    ref_list = [reference_audio]
+                    if secondary_reference is not None:
+                        ref_list.append(secondary_reference)
+                    g_tgt = self._process_multiple_references(ref_list, self.hps.data.sampling_rate, 
+                                                             noise_reduction_strength)
                 else:
+                    # For FreeVC-s, process the primary reference for mel spectrogram
+                    print("Processing reference audio for mel...")
+                    wav_tgt = self._process_audio(reference_audio, self.hps.data.sampling_rate, "reference")
+                    wav_tgt = self._preprocess_audio(wav_tgt, self.hps.data.sampling_rate, 
+                                                   self.hps.data.sampling_rate, noise_reduction_strength)
+                    wav_tgt, _ = librosa.effects.trim(wav_tgt, top_db=20)
+                    
                     print("Computing mel spectrogram...")
                     wav_tgt = torch.from_numpy(wav_tgt).unsqueeze(0).to(self.device)
                     mel_tgt = mel_spectrogram_torch(
@@ -236,30 +366,39 @@ class FreeVCNode:
                         self.hps.data.mel_fmin,
                         self.hps.data.mel_fmax
                     )
-
-                # Process source audio
-                print("Processing source audio...")
-                wav_src = self._process_audio(source_audio, self.hps.data.sampling_rate, "source")
-                wav_src = torch.from_numpy(wav_src).unsqueeze(0).to(self.device)
                 
-                # Compute WavLM features
+                # Compute WavLM features with temperature control
                 print("Computing WavLM features...")
-                c = self.models['wavlm'](wav_src).last_hidden_state.transpose(1, 2)
-                print("WavLM features computed")
-
+                c = self.models['wavlm'](wav_src).last_hidden_state
+                
+                # Apply temperature to control the feature extraction process
+                if temperature < 1.0:
+                    c = c / temperature
+                c = c.transpose(1, 2)
+                
                 # Convert voice based on model type
-                print(f"Performing voice conversion with {model_type}...")
-                if model_type == "FreeVC":
+                print(f"Performing enhanced voice conversion with {model_type}...")
+                if model_type in ["FreeVC", "FreeVC (24kHz)"]:
                     audio = self.models[model_type]['model'].infer(c, g=g_tgt)
-                elif model_type == "FreeVC-s":
+                else:  # FreeVC-s
                     audio = self.models[model_type]['model'].infer(c, mel=mel_tgt)
-                else:  # FreeVC (24kHz)
-                    audio = self.models[model_type]['model'].infer(c, g=g_tgt)
                 
                 # Process output
                 audio = audio[0][0].data.cpu().float().numpy()
+                
+                # Determine sampling rate
                 sampling_rate = 24000 if model_type == "FreeVC (24kHz)" else self.hps.data.sampling_rate
-                print("Voice conversion completed")
+                
+                # Apply enhanced post-processing with normalization
+                audio = self._apply_post_processing(
+                    audio, 
+                    sampling_rate, 
+                    clarity_enhancement,
+                    normalize_output,
+                    normalization_level
+                )
+                
+                print("Enhanced voice conversion completed")
                 
                 # Return in the same format as input
                 print("Preparing output...")
@@ -277,5 +416,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "FreeVC Voice Converter": "FreeVC Voice Converter 🎤"
+    "FreeVC Voice Conversion": "FreeVC Voice Converter 🎤"
 }
