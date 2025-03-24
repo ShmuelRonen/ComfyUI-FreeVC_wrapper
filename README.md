@@ -42,7 +42,7 @@ a. **Voice Conversion Models**:
 All model checkpoint files (6 models) are available in a single Google Drive folder:
 [Download All Model Checkpoints (Google Drive)](https://drive.google.com/file/d/1RDAHGKelvtHNBpdjrbdi1R39WftzwadD/view?usp=sharing)
 
-After downloading, extract the file and place the checkpoints folder in the main directory:
+After downloading, extract the file and place the checkpoints folder in the freevc directory:
 ```
 ComfyUI-FreeVC_wrapper/freevc/
 ```
