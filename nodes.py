@@ -473,7 +473,7 @@ class FreeVCNode:
                 # Apply custom diffusion parameters for diffusion-based models
                 if is_diffusion:
                     print(f"Using diffusion parameters - noise_coef: {diffusion_noise_coef}, steps: {diffusion_steps}")
-                    if self.hps.train.get('diffusion'):
+                    if hasattr(self.hps.train, 'diffusion'):
                         # Temporarily save original settings to restore later
                         original_noise_coef = self.hps.train.diffusion.get('inference_noise_coef', 0.3)
                         original_steps = self.hps.train.diffusion.get('diffusion_steps', 50)
