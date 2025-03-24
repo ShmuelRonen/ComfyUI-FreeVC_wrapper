@@ -1,4 +1,4 @@
-# ComfyUI-FreeVC_wrapper
+# ComfyUI-FreeVC_wrapper v2
 
 ## Support My Work
 If you find this project helpful, consider buying me a coffee:
@@ -7,15 +7,16 @@ If you find this project helpful, consider buying me a coffee:
 
 A voice conversion extension node for ComfyUI based on [FreeVC](https://github.com/OlaWod/FreeVC), enabling high-quality voice conversion capabilities within the ComfyUI framework.
 
-![image](https://github.com/user-attachments/assets/f4d2ef79-7910-4064-9813-3a628d589284)
-
+![image](https://github.com/user-attachments/assets/ecf14818-3606-48f5-90f8-91554efe7885)
 
 ## Features
 
 - Support for multiple FreeVC models:
-  - FreeVC: Standard 16kHz model
-  - FreeVC-s: Source-filtering based model
-  - FreeVC (24kHz): High-quality 24kHz model
+  - Standard models (16kHz): FreeVC, FreeVC-s
+  - High-quality model (24kHz): FreeVC (24kHz) 
+  - Diffusion-enhanced models: D-FreeVC, D-FreeVC-s, D-FreeVC (24kHz)
+- Enhanced voice mimicry capabilities
+- Advanced audio pre and post-processing options
 - Stereo and mono audio support
 - Automatic audio resampling
 - Integrated with ComfyUI's audio processing pipeline
@@ -32,65 +33,98 @@ cd ComfyUI-FreeVC_wrapper
 
 2. Install required Python packages:
 ```bash
-pip install librosa transformers numpy torch
+pip install librosa transformers numpy torch noisereduce
 ```
 
 3. Download required checkpoints:
 
-a. Voice Conversion Models:
-Download the following checkpoint files from [HuggingFace](https://huggingface.co/spaces/OlaWod/FreeVC/tree/main/checkpoints) and place them in the `custom_nodes/ComfyUI-FreeVC_wrapper/freevc/checkpoints` directory:
+a. **Voice Conversion Models**:
+All model checkpoint files (6 models) are available in a single Google Drive folder:
+[Download All Model Checkpoints (Google Drive)](https://drive.google.com/file/d/1RDAHGKelvtHNBpdjrbdi1R39WftzwadD/view?usp=sharing)
 
-| Model | Filename | Description |
-|-------|----------|-------------|
-| FreeVC | `freevc.pth` | Standard 16kHz model |
-| FreeVC-s | `freevc-s.pth` | Source-filtering based model |
-| FreeVC (24kHz) | `freevc-24.pth` | High-quality 24kHz model |
+After downloading, extract the contents and place the checkpoints folder in the following directory:
+```
+ComfyUI-FreeVC_wrapper/freevc/
+```
 
-Direct download links:
-- [freevc.pth](https://huggingface.co/spaces/OlaWod/FreeVC/resolve/main/checkpoints/freevc.pth)
-- [freevc-s.pth](https://huggingface.co/spaces/OlaWod/FreeVC/resolve/main/checkpoints/freevc-s.pth)
-- [freevc-24.pth](https://huggingface.co/spaces/OlaWod/FreeVC/resolve/main/checkpoints/freevc-24.pth)
-
-b. Speaker Encoder:
+b. **Speaker Encoder**: 
 Download the speaker encoder checkpoint from [HuggingFace](https://huggingface.co/spaces/OlaWod/FreeVC/tree/main/speaker_encoder/ckpt) and place it in the `custom_nodes/ComfyUI-FreeVC_wrapper/freevc/speaker_encoder/ckpt` directory:
 
 | Component | Filename | Required For |
 |-----------|----------|--------------|
-| Speaker Encoder | `pretrained_bak_5805000.pt` | FreeVC and FreeVC (24kHz) models |
+| Speaker Encoder | `pretrained_bak_5805000.pt` | FreeVC, FreeVC (24kHz), D-FreeVC, and D-FreeVC (24kHz) models |
 
 Direct download link:
 - [pretrained_bak_5805000.pt](https://huggingface.co/spaces/OlaWod/FreeVC/resolve/main/speaker_encoder/ckpt/pretrained_bak_5805000.pt)
 
+Your final directory structure should look like this:
+```
+ComfyUI-FreeVC_wrapper/
+├── freevc/
+    ├── checkpoints/
+    │   ├── freevc.pth         # Standard 16kHz model
+    │   ├── freevc-s.pth       # Source-filtering based model
+    │   ├── freevc-24.pth      # High-quality 24kHz model
+    │   ├── d-freevc.pth       # Diffusion-enhanced 16kHz model
+    │   ├── d-freevc-s.pth     # Diffusion-enhanced source-filtering model
+    │   └── d-freevc-24.pth    # Diffusion-enhanced 24kHz model
+    └── speaker_encoder/
+        └── ckpt/
+            └── pretrained_bak_5805000.pt  # Speaker encoder checkpoint
+```
 
 ## Usage
 
-1. In ComfyUI, locate the "FreeVC Voice Conversion" node under the "audio/voice conversion" category
+1. In ComfyUI, locate the "FreeVC Voice Converter v2 🎤" node under the "audio/voice conversion" category
 2. Connect your inputs:
    - Source audio: The audio you want to convert
    - Reference audio: The target voice style
-   - Select model type: Choose between FreeVC, FreeVC-s, or FreeVC (24kHz)
-3. Connect the output to your desired audio output node
+   - (Optional) Secondary reference: Additional reference for more robust voice matching
+   - Select model type: Choose between standard and diffusion-enhanced models
+
+3. Configure the conversion parameters:
+   - Source processing: Noise reduction, source neutralization, clarity enhancement
+   - Conversion settings: Temperature, diffusion parameters (for diffusion models)
+   - Post-processing: Voice matching strength, presence boost, normalization
+
+4. Connect the output to your desired audio output node
 
 ### Model Selection Guide
 
-- **FreeVC**: Best for general purpose voice conversion at 16kHz
+- **FreeVC**: Good for general purpose voice conversion at 16kHz
 - **FreeVC-s**: Better preservation of source speech content, recommended for maintaining clarity
-- **FreeVC (24kHz)**: Highest quality output with better audio fidelity
+- **FreeVC (24kHz)**: Higher quality output with better audio fidelity
+- **D-FreeVC**: Enhanced timbre conversion with more natural sounding results at 16kHz
+- **D-FreeVC-s**: Combines good content preservation with improved voice characteristics
+- **D-FreeVC (24kHz)**: Highest quality output with excellent timbre matching at 24kHz
+
+### Tips for Better Voice Conversion
+
+1. **Use longer reference samples**: 5-10 seconds of clean speech works best
+2. **Try multiple reference samples**: Use the secondary reference input for more robust voice profiles
+3. **For diffusion models**:
+   - Try lower diffusion noise values (0.05-0.1) for cleaner output
+   - Increase diffusion steps (30-40) for higher quality (but slower processing)
+4. **Adjust voice mimicry settings**:
+   - Increase voice_match_strength (0.6-0.8) for stronger character matching
+   - Use neutralize_source (0.3-0.5) to reduce source voice influence
+   - Add presence_boost (0.3-0.5) for more "in the room" sound
 
 ## Known Issues and Troubleshooting
 
 1. **File Not Found Errors**:
    - Ensure all checkpoint files are in the correct directory
-   - Verify file names match exactly: `freevc.pth`, `freevc-s.pth`, `freevc-24.pth`
+   - Verify file names match exactly (case-sensitive)
 
 2. **CUDA Out of Memory**:
    - Try processing shorter audio clips
    - Use CPU if GPU memory is insufficient
+   - Lower diffusion steps for diffusion-based models
 
-3. **Audio Format Issues**:
-   - The node automatically handles stereo to mono conversion
-   - Supports resampling from any sample rate
-   - Trim silence from audio files for better results
+3. **Audio Quality Issues**:
+   - Try different models - each has strengths for different source/target voices
+   - For diffusion models, lower the noise coefficient if there's static
+   - Increase clarity_enhancement for better intelligibility
 
 ## Contributing
 
