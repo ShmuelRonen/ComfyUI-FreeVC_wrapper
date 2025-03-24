@@ -16,12 +16,12 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "noisereduce"])
     import noisereduce as nr
 
-# Add FreeVC directory to path
+# Add FreeVC directory to path - MODIFY THIS PART
 freevc_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "freevc")
 if freevc_dir not in sys.path:
-    sys.path.append(freevc_dir)
+    sys.path.insert(0, freevc_dir)  # Changed from append to insert(0)
 
-# Import FreeVC modules
+# Import FreeVC modules - KEEP THESE AS THEY ARE
 from models import SynthesizerTrn
 from mel_processing import mel_spectrogram_torch
 from speaker_encoder.voice_encoder import SpeakerEncoder
