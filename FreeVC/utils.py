@@ -16,12 +16,12 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "noisereduce"])
     import noisereduce as nr
 
-# Add FreeVC directory to path - MODIFY THIS PART
+# Add FreeVC directory to path with higher priority to avoid conflicts
 freevc_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "freevc")
 if freevc_dir not in sys.path:
-    sys.path.insert(0, freevc_dir)  # Changed from append to insert(0)
+    sys.path.insert(0, freevc_dir)  # Insert at beginning to prioritize
 
-# Import FreeVC modules - KEEP THESE AS THEY ARE
+# Import FreeVC modules
 from models import SynthesizerTrn
 from mel_processing import mel_spectrogram_torch
 from speaker_encoder.voice_encoder import SpeakerEncoder
@@ -105,29 +105,18 @@ def get_model_filenames(model_type):
     Get the config and checkpoint filenames for a given model type
     
     Args:
-        model_type (str): The model type (e.g., 'FreeVC', 'D-FreeVC', etc.)
+        model_type (str): The model type (e.g., 'FreeVC', 'FreeVC-s', etc.)
         
     Returns:
         tuple: (config_filename, checkpoint_filename)
     """
-    is_diffusion = model_type.startswith("D-")
-    base_model_type = model_type[2:] if is_diffusion else model_type
-    
-    if base_model_type == "FreeVC (24kHz)":
-        if is_diffusion:
-            config_filename = "d-freevc-24.json"
-            checkpoint_filename = "d-freevc-24.pth"
-        else:
-            config_filename = "freevc-24.json"
-            checkpoint_filename = "freevc-24.pth"
+    if model_type == "FreeVC (24kHz)":
+        config_filename = "freevc-24.json"
+        checkpoint_filename = "freevc-24.pth"
     else:
-        base_name = base_model_type.lower().replace(' ', '-')
-        if is_diffusion:
-            config_filename = f"d-{base_name}.json"
-            checkpoint_filename = f"d-{base_name}.pth"
-        else:
-            config_filename = f"{base_name}.json"
-            checkpoint_filename = f"{base_name}.pth"
+        base_name = model_type.lower().replace(' ', '-')
+        config_filename = f"{base_name}.json"
+        checkpoint_filename = f"{base_name}.pth"
             
     return config_filename, checkpoint_filename
 
@@ -156,7 +145,7 @@ def list_available_models(freevc_dir):
         return available_models
     
     # Standard model types
-    model_types = ["FreeVC", "FreeVC-s", "FreeVC (24kHz)", "D-FreeVC", "D-FreeVC-s", "D-FreeVC (24kHz)"]
+    model_types = ["FreeVC", "FreeVC-s", "FreeVC (24kHz)"]
     
     for model_type in model_types:
         config_filename, checkpoint_filename = get_model_filenames(model_type)
@@ -169,8 +158,8 @@ def list_available_models(freevc_dir):
     return available_models
 
 def apply_post_processing(audio, sampling_rate, clarity_enhancement=0.3, 
-                        voice_match_strength=0.5, presence_boost=0.4,
-                        normalize_output=True, normalization_level=0.95):
+                         voice_match_strength=0.5, presence_boost=0.4,
+                         normalize_output=True, normalization_level=0.95):
     """
     Apply enhanced post-processing to improve the converted voice
     
@@ -206,7 +195,6 @@ def apply_post_processing(audio, sampling_rate, clarity_enhancement=0.3,
             formant3_enhanced = signal.filtfilt(b3, a3, audio)
             
             # Mix the enhancements with original with precise formant balancing
-            # The ratios here are based on typical importance of different formant regions
             audio = audio * (1-voice_match_strength) + \
                    formant1_enhanced * (voice_match_strength*0.5) + \
                    formant2_enhanced * (voice_match_strength*0.3) + \
@@ -353,13 +341,96 @@ def process_audio(audio_data, target_sr, label=""):
     
     return wav
 
-def process_multiple_references(reference_audios, model_type, target_sr, device, speaker_encoder, noise_reduction_strength=0.5):
+def preprocess_audio(wav, sr, target_sr, noise_reduction_strength=0.5, 
+                    neutralize_source=0.0, enhance_clarity=0.0,
+                    remove_sibilance=0.0, vad_sensitivity=20):
+    """
+    Enhanced preprocessing for audio with multiple options
+    
+    Args:
+        wav (numpy.ndarray): Audio data
+        sr (int): Sample rate of audio
+        target_sr (int): Target sample rate
+        noise_reduction_strength (float): Amount of noise reduction to apply
+        neutralize_source (float): How much to neutralize voice characteristics
+        enhance_clarity (float): Amount of clarity enhancement
+        remove_sibilance (float): Amount of sibilance reduction
+        vad_sensitivity (int): Voice activity detection sensitivity
+        
+    Returns:
+        numpy.ndarray: Processed audio data
+    """
+    # Apply noise reduction
+    if noise_reduction_strength > 0:
+        try:
+            wav = nr.reduce_noise(y=wav, sr=sr, prop_decrease=noise_reduction_strength)
+        except Exception as e:
+            print(f"Noise reduction failed: {e}, skipping...")
+    
+    # Voice activity detection to focus on speech segments
+    try:
+        intervals = librosa.effects.split(wav, top_db=vad_sensitivity)
+        if len(intervals) > 0:  # Only apply if we found speech segments
+            wav_output = np.zeros_like(wav)
+            for interval in intervals:
+                wav_output[interval[0]:interval[1]] = wav[interval[0]:interval[1]]
+            wav = wav_output
+    except Exception as e:
+        print(f"VAD failed: {e}, using original audio...")
+    
+    # Neutralize source voice characteristics
+    if neutralize_source > 0:
+        try:
+            # Flatten formants a bit to neutralize voice
+            b1, a1 = signal.butter(2, [300/(sr/2), 3000/(sr/2)], 'bandpass', analog=False)
+            neutral_voice = signal.filtfilt(b1, a1, wav)
+            
+            # Mix with original
+            wav = wav * (1-neutralize_source) + neutral_voice * neutralize_source
+        except Exception as e:
+            print(f"Source neutralization failed: {e}, skipping...")
+    
+    # Enhance clarity
+    if enhance_clarity > 0:
+        try:
+            b2, a2 = signal.butter(2, 2000/(sr/2), 'high', analog=False)
+            clarity = signal.filtfilt(b2, a2, wav)
+            wav = wav * (1-enhance_clarity) + clarity * enhance_clarity
+        except Exception as e:
+            print(f"Clarity enhancement failed: {e}, skipping...")
+    
+    # Reduce sibilance (de-essing)
+    if remove_sibilance > 0:
+        try:
+            # Sibilance mainly in 5-8kHz range
+            b3, a3 = signal.butter(2, [5000/(sr/2), 8000/(sr/2)], 'bandpass', analog=False)
+            sibilance = signal.filtfilt(b3, a3, wav)
+            
+            # Compress sibilance
+            thresh = np.max(np.abs(sibilance)) * 0.2
+            ratio = 0.3
+            sibilance_reduced = np.where(
+                np.abs(sibilance) > thresh,
+                np.sign(sibilance) * (thresh + (np.abs(sibilance) - thresh) * ratio),
+                sibilance
+            )
+            
+            # Recombine with reduced sibilance
+            wav = wav - (sibilance * remove_sibilance) + (sibilance_reduced * remove_sibilance)
+        except Exception as e:
+            print(f"Sibilance reduction failed: {e}, skipping...")
+    
+    # Normalize audio
+    wav = librosa.util.normalize(wav) * 0.95
+    
+    return wav
+
+def process_multiple_references(reference_audios, target_sr, device, speaker_encoder, noise_reduction_strength=0.5):
     """
     Process multiple reference samples to get more robust speaker embedding
     
     Args:
         reference_audios (list): List of reference audio dictionaries
-        model_type (str): The model type
         target_sr (int): Target sampling rate
         device (torch.device): Device to use for processing
         speaker_encoder: Speaker encoder model
@@ -372,20 +443,18 @@ def process_multiple_references(reference_audios, model_type, target_sr, device,
         reference_audios = [reference_audios]
             
     embeddings = []
-    base_model_type = model_type[2:] if model_type.startswith("D-") else model_type
     
     for ref_audio in reference_audios:
         wav_ref = process_audio(ref_audio, target_sr, "reference")
         wav_ref = preprocess_audio(wav_ref, target_sr, target_sr, noise_reduction_strength)
         
         # Get embedding for this reference
-        if base_model_type in ["FreeVC", "FreeVC (24kHz)"]:
-            try:
-                print(f"Getting speaker embedding for {model_type}")
-                ref_embed = speaker_encoder.embed_utterance(wav_ref)
-                embeddings.append(ref_embed)
-            except Exception as e:
-                print(f"Error getting speaker embedding: {str(e)}")
+        try:
+            print("Getting speaker embedding")
+            ref_embed = speaker_encoder.embed_utterance(wav_ref)
+            embeddings.append(ref_embed)
+        except Exception as e:
+            print(f"Error getting speaker embedding: {str(e)}")
                 
     # Average the embeddings
     if embeddings:
@@ -397,53 +466,6 @@ def process_multiple_references(reference_audios, model_type, target_sr, device,
     # If we get here with no embeddings, something went wrong
     print("WARNING: No embeddings generated from reference audio. This will cause errors.")
     return None
-
-def apply_post_processing(audio, sampling_rate, clarity_enhancement=0.3, normalize_output=True, normalization_level=0.95):
-    """
-    Apply post-processing to enhance the converted voice
-    
-    Args:
-        audio (numpy.ndarray): Audio data to process
-        sampling_rate (int): Sampling rate of the audio
-        clarity_enhancement (float): Amount of clarity enhancement to apply (0.0-1.0)
-        normalize_output (bool): Whether to normalize the output audio
-        normalization_level (float): Target level for normalization (0.0-1.0)
-        
-    Returns:
-        numpy.ndarray: Processed audio data
-    """
-    try:
-        # Gentle noise gate to remove background artifacts
-        threshold = 0.005
-        audio[np.abs(audio) < threshold] = 0
-        
-        # Apply voice matching EQ if requested
-        if voice_match_strength > 0:
-            # Enhance formants (vocal tract resonances) - key for voice mimicry
-            b1, a1 = signal.butter(2, [500/(sampling_rate/2), 3500/(sampling_rate/2)], 'bandpass', analog=False)
-            formant_enhanced = signal.filtfilt(b1, a1, audio)
-            
-            # Boost around 1-2kHz range where voice character often resides
-            b2, a2 = signal.butter(2, [1000/(sampling_rate/2), 2000/(sampling_rate/2)], 'bandpass', analog=False)
-            character_enhanced = signal.filtfilt(b2, a2, audio)
-            
-            # Mix the enhancements with original
-            audio = audio * (1-voice_match_strength) + formant_enhanced * (voice_match_strength*0.6) + character_enhanced * (voice_match_strength*0.4)
-        
-        # Apply clarity enhancement if requested
-        if clarity_enhancement > 0:
-            b, a = signal.butter(2, 3000/(sampling_rate/2), 'high', analog=False)
-            audio = signal.filtfilt(b, a, audio) * clarity_enhancement + audio * (1-clarity_enhancement)
-            
-        # Apply output normalization if requested
-        if normalize_output:
-            if np.max(np.abs(audio)) > 0:
-                audio = librosa.util.normalize(audio)
-                audio = audio * normalization_level
-    except Exception as e:
-        print(f"Post-processing failed: {e}, using unprocessed audio...")
-            
-    return audio
 
 def save_audio(audio, file_path, sample_rate=16000):
     """
@@ -465,440 +487,12 @@ def save_audio(audio, file_path, sample_rate=16000):
     except Exception as e:
         print(f"Error saving audio: {e}")
 
-def modify_diffusion_params(hps, noise_coef=None, steps=None):
-    """
-    Modify diffusion parameters in the hyperparameters
-    
-    Args:
-        hps (HParams): Hyperparameters object
-        noise_coef (float, optional): New noise coefficient value
-        steps (int, optional): New diffusion steps value
-        
-    Returns:
-        tuple: (original_noise_coef, original_steps) - Original values for restoration
-    """
-    if not hasattr(hps, 'train') or not hasattr(hps.train, 'diffusion'):
-        return None, None
-    
-    # Save original values
-    original_noise_coef = hps.train.diffusion.get('inference_noise_coef', 0.3)
-    original_steps = hps.train.diffusion.get('diffusion_steps', 50)
-    
-    # Update values if provided
-    if noise_coef is not None:
-        hps.train.diffusion['inference_noise_coef'] = noise_coef
-    
-    if steps is not None:
-        hps.train.diffusion['diffusion_steps'] = steps
-    
-    return original_noise_coef, original_steps
-
-class FreeVCNode:
-    def __init__(self):
-        """Initialize Enhanced FreeVC Node with improved processing."""
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.models = {}
-        self.current_model_type = None
-        print("Enhanced FreeVC Node initialized on device:", self.device)
-    
-    def load_models(self, model_type):
-        """
-        Load required models for voice conversion if not already loaded.
-        
-        Args:
-            model_type (str): Type of FreeVC model to load
-        """
-        if model_type in self.models:
-            return
-            
-        print(f"Loading {model_type}...")
-        try:
-            # Check if this is a diffusion model variant
-            is_diffusion = model_type.startswith("D-")
-            base_model_type = model_type[2:] if is_diffusion else model_type
-            
-            # Get filenames for this model type
-            config_filename, checkpoint_filename = get_model_filenames(model_type)
-            
-            # Print exact filenames for debugging
-            print(f"Using config file: {config_filename}")
-            print(f"Using checkpoint file: {checkpoint_filename}")
-            
-            config_path = os.path.join(freevc_dir, "configs", config_filename)
-            print(f"Loading config from: {config_path}")
-            
-            # Check if config file exists
-            check_file_exists(config_path, "Config file")
-                
-            self.hps = load_config(config_path)
-            
-            # Initialize synthesis model
-            print("Initializing synthesis model...")
-            model = SynthesizerTrn(
-                self.hps.data.filter_length // 2 + 1,
-                self.hps.train.segment_size // self.hps.data.hop_length,
-                **self.hps.model).to(self.device)
-            model.eval()
-            
-            # Load checkpoint
-            checkpoint_path = os.path.join(freevc_dir, "checkpoints", checkpoint_filename)
-            print(f"Loading checkpoint from: {checkpoint_path}")
-            
-            # Check if checkpoint file exists
-            check_file_exists(checkpoint_path, "Checkpoint file")
-            
-            # Try to load the checkpoint
-            try:
-                model, _, _ = load_checkpoint(checkpoint_path, model)
-                print(f"Successfully loaded checkpoint: {checkpoint_filename}")
-                
-                # Load speaker encoder for specific models
-                if base_model_type in ["FreeVC", "FreeVC (24kHz)"]:
-                    print("Loading speaker encoder...")
-                    encoder_path = os.path.join(freevc_dir, 'speaker_encoder/ckpt/pretrained_bak_5805000.pt')
-                    
-                    # Check if speaker encoder exists
-                    check_file_exists(encoder_path, "Speaker encoder checkpoint")
-                        
-                    start_time = torch.cuda.Event(enable_timing=True)
-                    end_time = torch.cuda.Event(enable_timing=True)
-                    start_time.record()
-                    
-                    speaker_encoder = SpeakerEncoder(encoder_path)
-                    
-                    end_time.record()
-                    torch.cuda.synchronize()
-                    print(f"Loaded the voice encoder model on {self.device} in {start_time.elapsed_time(end_time)/1000:.2f} seconds.")
-                    
-                    self.models[model_type] = {
-                        'model': model,
-                        'speaker_encoder': speaker_encoder,
-                        'is_diffusion': is_diffusion
-                    }
-                else:
-                    self.models[model_type] = {
-                        'model': model,
-                        'is_diffusion': is_diffusion
-                    }
-            except Exception as e:
-                print(f"Error loading {checkpoint_filename}: {str(e)}")
-                if is_diffusion:
-                    print(f"Falling back to standard model: {base_model_type}")
-                    return self.load_models(base_model_type)
-                else:
-                    raise e
-                
-            # Load WavLM if not already loaded
-            if 'wavlm' not in self.models:
-                print("Loading WavLM...")
-                print("Downloading WavLM model if needed...")
-                self.models['wavlm'] = WavLMModel.from_pretrained("microsoft/wavlm-large").to(self.device)
-                print("WavLM loaded successfully")
-                
-        except Exception as e:
-            print(f"Error loading models: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            
-            # Fall back to standard model if diffusion model fails
-            if is_diffusion:
-                print(f"Falling back to standard model: {base_model_type}")
-                return self.load_models(base_model_type)
-            else:
-                raise e
-    
-    @classmethod
-    def INPUT_TYPES(s):
-        """Define enhanced input types for ComfyUI."""
-        return {
-            "required": {
-                "model_type": (["FreeVC", "FreeVC-s", "FreeVC (24kHz)", 
-                               "D-FreeVC", "D-FreeVC-s", "D-FreeVC (24kHz)"],),
-                "source_audio": ("AUDIO",),
-                "reference_audio": ("AUDIO",)
-            },
-            "optional": {
-                "secondary_reference": ("AUDIO", {"default": None}),
-                
-                # Source audio processing
-                "noise_reduction_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.1}),
-                "neutralize_source": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 0.7, "step": 0.1}),
-                "enhance_clarity": ("FLOAT", {"default": 0.2, "min": 0.0, "max": 0.7, "step": 0.1}),
-                "remove_sibilance": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 0.7, "step": 0.1}),
-                "vad_sensitivity": ("INT", {"default": 20, "min": 10, "max": 40, "step": 5}),
-                
-                # Conversion parameters
-                "temperature": ("FLOAT", {"default": 0.6, "min": 0.1, "max": 1.0, "step": 0.1}),
-                "diffusion_noise_coef": ("FLOAT", {"default": 0.05, "min": 0.0, "max": 0.5, "step": 0.05}),
-                "diffusion_steps": ("INT", {"default": 30, "min": 10, "max": 50, "step": 5}),
-                
-                # Post-processing
-                "clarity_enhancement": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 1.0, "step": 0.1}),
-                "voice_match_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.1}),
-                "presence_boost": ("FLOAT", {"default": 0.4, "min": 0.0, "max": 0.8, "step": 0.1}),
-                "normalize_output": ("BOOLEAN", {"default": True}),
-                "normalization_level": ("FLOAT", {"default": 0.95, "min": 0.1, "max": 1.0, "step": 0.05})
-            }
-        }
-
-    RETURN_TYPES = ("AUDIO",)
-    FUNCTION = "convert_voice_enhanced"
-    CATEGORY = "audio/voice conversion"
-
-    def convert_voice_enhanced(self, model_type, source_audio, reference_audio, 
-                             secondary_reference=None, 
-                             # Source processing parameters
-                             noise_reduction_strength=0.5, 
-                             neutralize_source=0.3,
-                             enhance_clarity=0.2,
-                             remove_sibilance=0.3,
-                             vad_sensitivity=20,
-                             # Conversion parameters
-                             temperature=0.6,
-                             diffusion_noise_coef=0.05, 
-                             diffusion_steps=30,
-                             # Post-processing parameters
-                             clarity_enhancement=0.3, 
-                             voice_match_strength=0.5,
-                             presence_boost=0.4,
-                             normalize_output=True, 
-                             normalization_level=0.95):
-        """
-        Enhanced voice conversion with multiple references and improved processing
-        
-        Args:
-            model_type (str): FreeVC model type to use
-            source_audio (dict): Source audio to convert
-            reference_audio (dict): Reference audio for voice characteristics
-            secondary_reference (dict, optional): Secondary reference for more robust conversion
-            
-            # Source processing parameters
-            noise_reduction_strength (float): Amount of noise reduction to apply (0.0-1.0)
-            neutralize_source (float): How much to neutralize source voice characteristics (0.0-0.7)
-            enhance_clarity (float): Amount of speech clarity enhancement in preprocessing (0.0-0.7)
-            remove_sibilance (float): Amount of sibilance (ssss sounds) reduction (0.0-0.7)
-            vad_sensitivity (int): Voice activity detection sensitivity (lower = more sensitive)
-            
-            # Conversion parameters
-            temperature (float): Temperature for WavLM feature extraction (0.1-1.0)
-            diffusion_noise_coef (float): Noise coefficient for diffusion models (0.0-0.5)
-            diffusion_steps (int): Number of diffusion steps (10-50)
-            
-            # Post-processing parameters
-            clarity_enhancement (float): Amount of clarity enhancement to apply (0.0-1.0)
-            voice_match_strength (float): How strongly to enhance voice characteristics (0.0-1.0)
-            presence_boost (float): Amount of vocal presence enhancement (0.0-0.8)
-            normalize_output (bool): Whether to normalize the output audio
-            normalization_level (float): Target level for normalization (0.0-1.0)
-            
-        Returns:
-            tuple: Audio data in ComfyUI format
-        """
-        try:
-            print(f"Starting enhanced voice conversion with {model_type}...")
-            
-            self.current_model_type = model_type
-            self.load_models(model_type)
-            print("Models loaded successfully")
-            
-            # Check if using diffusion model
-            is_diffusion = self.models[model_type].get('is_diffusion', False)
-            base_model_type = model_type[2:] if is_diffusion else model_type
-            
-            print(f"Using {'diffusion-based' if is_diffusion else 'standard'} model: {model_type}")
-            
-            # Apply custom diffusion parameters if needed
-            original_noise_coef, original_steps = None, None
-            if is_diffusion and hasattr(self.hps, 'train') and hasattr(self.hps.train, 'diffusion'):
-                print(f"Setting diffusion parameters - noise_coef: {diffusion_noise_coef}, steps: {diffusion_steps}")
-                original_noise_coef = self.hps.train.diffusion.get('inference_noise_coef', 0.3)
-                original_steps = self.hps.train.diffusion.get('diffusion_steps', 50)
-                
-                # Apply user settings
-                self.hps.train.diffusion['inference_noise_coef'] = diffusion_noise_coef
-                self.hps.train.diffusion['diffusion_steps'] = diffusion_steps
-            
-            with torch.no_grad():
-                # Process source audio with enhanced preprocessing
-                print("Processing source audio...")
-                wav_src = self._process_audio(source_audio, self.hps.data.sampling_rate, "source")
-                
-                # Apply enhanced preprocessing with new parameters
-                wav_src = self._preprocess_audio(
-                    wav_src, 
-                    self.hps.data.sampling_rate, 
-                    self.hps.data.sampling_rate, 
-                    noise_reduction_strength=noise_reduction_strength,
-                    neutralize_source=neutralize_source,
-                    enhance_clarity=enhance_clarity,
-                    remove_sibilance=remove_sibilance,
-                    vad_sensitivity=vad_sensitivity
-                )
-                
-                wav_src = torch.from_numpy(wav_src).unsqueeze(0).to(self.device)
-                
-                # Create reference list and process reference audio(s)
-                if base_model_type in ["FreeVC", "FreeVC (24kHz)"]:
-                    # Process reference embeddings
-                    ref_list = [reference_audio]
-                    if secondary_reference is not None:
-                        ref_list.append(secondary_reference)
-                        
-                    print("Processing reference audio for speaker embedding...")
-                    g_tgt = None
-                    for ref_audio in ref_list:
-                        wav_ref = self._process_audio(ref_audio, self.hps.data.sampling_rate, "reference")
-                        # For reference audio, we don't neutralize source but apply other enhancements
-                        wav_ref = self._preprocess_audio(
-                            wav_ref, 
-                            self.hps.data.sampling_rate, 
-                            self.hps.data.sampling_rate, 
-                            noise_reduction_strength=noise_reduction_strength,
-                            neutralize_source=0.0,  # Don't neutralize reference
-                            enhance_clarity=enhance_clarity,
-                            remove_sibilance=remove_sibilance,
-                            vad_sensitivity=vad_sensitivity
-                        )
-                        
-                        # Get embedding for this reference
-                        try:
-                            # Make sure speaker encoder exists for current model
-                            if 'speaker_encoder' not in self.models[self.current_model_type]:
-                                print(f"Warning: Speaker encoder not found for {self.current_model_type}")
-                                continue
-                                
-                            print(f"Getting speaker embedding for {self.current_model_type}")
-                            ref_embed = self.models[self.current_model_type]['speaker_encoder'].embed_utterance(wav_ref)
-                            
-                            if g_tgt is None:
-                                g_tgt = torch.from_numpy(ref_embed).unsqueeze(0).to(self.device)
-                            else:
-                                # Average with previous embeddings
-                                new_embed = torch.from_numpy(ref_embed).unsqueeze(0).to(self.device)
-                                g_tgt = (g_tgt + new_embed) / 2.0
-                        except Exception as e:
-                            print(f"Error getting speaker embedding: {str(e)}")
-                    
-                    # Safety check - fall back to standard model if we don't get a valid g_tgt
-                    if g_tgt is None and is_diffusion:
-                        print(f"Failed to get speaker embedding. Falling back to standard model: {base_model_type}")
-                        
-                        # Restore original diffusion parameters if modified
-                        if original_noise_coef is not None and original_steps is not None:
-                            self.hps.train.diffusion['inference_noise_coef'] = original_noise_coef
-                            self.hps.train.diffusion['diffusion_steps'] = original_steps
-                            
-                        return self.convert_voice_enhanced(
-                            base_model_type, source_audio, reference_audio,
-                            secondary_reference, noise_reduction_strength,
-                            neutralize_source, enhance_clarity, remove_sibilance,
-                            vad_sensitivity, temperature, diffusion_noise_coef,
-                            diffusion_steps, clarity_enhancement, voice_match_strength,
-                            presence_boost, normalize_output, normalization_level
-                        )
-                else:
-                    # For FreeVC-s, process the primary reference for mel spectrogram
-                    print("Processing reference audio for mel...")
-                    wav_tgt = self._process_audio(reference_audio, self.hps.data.sampling_rate, "reference")
-                    wav_tgt = self._preprocess_audio(
-                        wav_tgt, 
-                        self.hps.data.sampling_rate, 
-                        self.hps.data.sampling_rate, 
-                        noise_reduction_strength=noise_reduction_strength,
-                        neutralize_source=0.0,  # Don't neutralize reference
-                        enhance_clarity=enhance_clarity,
-                        remove_sibilance=remove_sibilance,
-                        vad_sensitivity=vad_sensitivity
-                    )
-                    
-                    # Add a quality check for reference audio
-                    if np.max(np.abs(wav_tgt)) < 0.1:
-                        print("Warning: Reference audio is very quiet, this may affect conversion quality")
-                    
-                    print("Computing mel spectrogram...")
-                    wav_tgt = torch.from_numpy(wav_tgt).unsqueeze(0).to(self.device)
-                    mel_tgt = mel_spectrogram_torch(
-                        wav_tgt, 
-                        self.hps.data.filter_length,
-                        self.hps.data.n_mel_channels,
-                        self.hps.data.sampling_rate,
-                        self.hps.data.hop_length,
-                        self.hps.data.win_length,
-                        self.hps.data.mel_fmin,
-                        self.hps.data.mel_fmax
-                    )
-                
-                # Compute WavLM features with temperature control
-                print("Computing WavLM features...")
-                c = self.models['wavlm'](wav_src).last_hidden_state
-                
-                # Apply temperature to control the feature extraction process
-                if temperature < 1.0:
-                    print(f"Applying temperature {temperature} to WavLM features")
-                    c = c / temperature
-                c = c.transpose(1, 2)
-                
-                # Convert voice based on model type
-                print(f"Performing voice conversion with {model_type}...")
-                    
-                # Perform the actual voice conversion
-                if base_model_type in ["FreeVC", "FreeVC (24kHz)"]:
-                    audio = self.models[model_type]['model'].infer(c, g=g_tgt)
-                else:  # FreeVC-s
-                    audio = self.models[model_type]['model'].infer(c, mel=mel_tgt)
-                
-                # Process output
-                audio = audio[0][0].data.cpu().float().numpy()
-                
-                # Determine sampling rate
-                sampling_rate = 24000 if base_model_type == "FreeVC (24kHz)" else self.hps.data.sampling_rate
-                
-                # Apply enhanced post-processing with voice matching
-                audio = self._apply_post_processing(
-                    audio, 
-                    sampling_rate, 
-                    clarity_enhancement=clarity_enhancement,
-                    voice_match_strength=voice_match_strength,
-                    presence_boost=presence_boost,
-                    normalize_output=normalize_output,
-                    normalization_level=normalization_level
-                )
-                
-                # Restore original diffusion parameters if modified
-                if original_noise_coef is not None and original_steps is not None:
-                    self.hps.train.diffusion['inference_noise_coef'] = original_noise_coef
-                    self.hps.train.diffusion['diffusion_steps'] = original_steps
-                
-                print("Enhanced voice conversion completed")
-                
-                # Return in the same format as input
-                print("Preparing output...")
-                return ({"waveform": torch.tensor(audio).unsqueeze(0).unsqueeze(0), 
-                        "sample_rate": sampling_rate},)
-                    
-        except Exception as e:
-            print(f"Error in voice conversion: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            
-            # Fall back to standard model if diffusion model fails
-            if is_diffusion:
-                print(f"Falling back to standard model: {base_model_type}")
-                return self.convert_voice_enhanced(
-                    base_model_type, source_audio, reference_audio,
-                    secondary_reference, noise_reduction_strength,
-                    neutralize_source, enhance_clarity, remove_sibilance,
-                    vad_sensitivity, temperature, diffusion_noise_coef,
-                    diffusion_steps, clarity_enhancement, voice_match_strength,
-                    presence_boost, normalize_output, normalization_level
-                )
-            else:
-                raise e
+# Simplified FreeVCNode class - moved to nodes.py
 
 NODE_CLASS_MAPPINGS = {
-    "FreeVC Voice Conversion": FreeVCNode
+    "FreeVC Voice Conversion": None  # Defined in nodes.py
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "FreeVC Voice Conversion": "FreeVC Voice Converter v2 🎤"
+    "FreeVC Voice Conversion": "FreeVC Voice Converter 🎤"
 }
