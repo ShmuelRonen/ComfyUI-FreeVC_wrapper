@@ -38,7 +38,7 @@ pip install librosa transformers numpy torch noisereduce
 3. Download required checkpoints:
 
 a. **Voice Conversion Models**:
-All model checkpoint files (6 models) are available in a single Google Drive folder:
+All model checkpoint files (3 models) are available in a single Google Drive folder:
 [Download All Model Checkpoints (Google Drive)](https://drive.google.com/file/d/1uGdFgjGV_rKlF0CyTToTRxhDsR0Y-dl_/view?usp=sharing)
 
 After downloading, extract the file and place the checkpoints folder in the freevc directory:
