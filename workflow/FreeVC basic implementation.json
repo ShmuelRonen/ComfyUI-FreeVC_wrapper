@@ -1,0 +1,265 @@
+{
+  "id": "7a8da134-3a9f-40f0-8c29-94d804405dc3",
+  "revision": 0,
+  "last_node_id": 32,
+  "last_link_id": 45,
+  "nodes": [
+    {
+      "id": 5,
+      "type": "LoadAudio",
+      "pos": [
+        1041.3966064453125,
+        4384.6962890625
+      ],
+      "size": [
+        315,
+        136
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "links": [
+            4,
+            34,
+            36,
+            38,
+            40
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.26",
+        "Node name for S&R": "LoadAudio"
+      },
+      "widgets_values": [
+        "boy.flac",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": 32,
+      "type": "LoadAudio",
+      "pos": [
+        1036.4517822265625,
+        4586.1650390625
+      ],
+      "size": [
+        315,
+        136
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "links": [
+            43
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.26",
+        "Node name for S&R": "LoadAudio"
+      },
+      "widgets_values": [
+        "boy1.flac",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": 28,
+      "type": "LoadAudio",
+      "pos": [
+        1042.0179443359375,
+        4137.77099609375
+      ],
+      "size": [
+        315,
+        136
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "links": [
+            45
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.26",
+        "Node name for S&R": "LoadAudio"
+      },
+      "widgets_values": [
+        "Alex-short.wav",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": 6,
+      "type": "PreviewAudio",
+      "pos": [
+        2018.9774169921875,
+        4230.283203125
+      ],
+      "size": [
+        315,
+        88
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "link": 42
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.26",
+        "Node name for S&R": "PreviewAudio"
+      },
+      "widgets_values": [
+        ""
+      ]
+    },
+    {
+      "id": 31,
+      "type": "FreeVC Voice Conversion",
+      "pos": [
+        1597.5330810546875,
+        4232.322265625
+      ],
+      "size": [
+        321.70831298828125,
+        233.1492919921875
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "source_audio",
+          "type": "AUDIO",
+          "link": 45
+        },
+        {
+          "name": "reference_audio",
+          "type": "AUDIO",
+          "link": 40
+        },
+        {
+          "name": "secondary_reference",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": 43
+        }
+      ],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "links": [
+            42
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "FreeVC Voice Conversion"
+      },
+      "widgets_values": [
+        "FreeVC",
+        0.5,
+        0.3,
+        0.7,
+        0.10000000000000002,
+        0.8500000000000002
+      ]
+    }
+  ],
+  "links": [
+    [
+      40,
+      5,
+      0,
+      31,
+      1,
+      "AUDIO"
+    ],
+    [
+      42,
+      31,
+      0,
+      6,
+      0,
+      "AUDIO"
+    ],
+    [
+      43,
+      32,
+      0,
+      31,
+      2,
+      "AUDIO"
+    ],
+    [
+      45,
+      28,
+      0,
+      31,
+      0,
+      "AUDIO"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "title": "Free VC",
+      "bounding": [
+        1006.8511352539062,
+        3999.1259765625,
+        1369.1942138671875,
+        793.0171508789062
+      ],
+      "color": "#3f789e",
+      "font_size": 24,
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.9646149645000006,
+      "offset": [
+        -575.5155581532412,
+        -3879.7903333960016
+      ]
+    },
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}
