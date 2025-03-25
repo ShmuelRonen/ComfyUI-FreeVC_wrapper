@@ -7,7 +7,7 @@ If you find this project helpful, consider buying me a coffee:
 
 A voice conversion extension node for ComfyUI based on [FreeVC](https://github.com/OlaWod/FreeVC), enabling high-quality voice conversion capabilities within the ComfyUI framework.
 
-![image](https://github.com/user-attachments/assets/ecf14818-3606-48f5-90f8-91554efe7885)
+![image](https://github.com/user-attachments/assets/296863cc-7c71-458a-9794-f7cf0f0a4290)
 
 ## Features
 
