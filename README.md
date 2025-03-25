@@ -1,4 +1,4 @@
-# ComfyUI-FreeVC_wrapper v2
+# ComfyUI-FreeVC_wrapper
 
 ## Support My Work
 If you find this project helpful, consider buying me a coffee:
@@ -14,8 +14,7 @@ A voice conversion extension node for ComfyUI based on [FreeVC](https://github.c
 - Support for multiple FreeVC models:
   - Standard models (16kHz): FreeVC, FreeVC-s
   - High-quality model (24kHz): FreeVC (24kHz) 
-  - Diffusion-enhanced models: D-FreeVC, D-FreeVC-s, D-FreeVC (24kHz)
-- Enhanced voice mimicry capabilities
+ - Enhanced voice mimicry capabilities
 - Advanced audio pre and post-processing options
 - Stereo and mono audio support
 - Automatic audio resampling
@@ -65,9 +64,7 @@ ComfyUI-FreeVC_wrapper/
     │   ├── freevc.pth         # Standard 16kHz model
     │   ├── freevc-s.pth       # Source-filtering based model
     │   ├── freevc-24.pth      # High-quality 24kHz model
-    │   ├── d-freevc.pth       # Diffusion-enhanced 16kHz model
-    │   ├── d-freevc-s.pth     # Diffusion-enhanced source-filtering model
-    │   └── d-freevc-24.pth    # Diffusion-enhanced 24kHz model
+    │  
     └── speaker_encoder/
         └── ckpt/
             └── pretrained_bak_5805000.pt  # Speaker encoder checkpoint
@@ -94,18 +91,13 @@ ComfyUI-FreeVC_wrapper/
 - **FreeVC**: Good for general purpose voice conversion at 16kHz
 - **FreeVC-s**: Better preservation of source speech content, recommended for maintaining clarity
 - **FreeVC (24kHz)**: Higher quality output with better audio fidelity
-- **D-FreeVC**: Enhanced timbre conversion with more natural sounding results at 16kHz
-- **D-FreeVC-s**: Combines good content preservation with improved voice characteristics
-- **D-FreeVC (24kHz)**: Highest quality output with excellent timbre matching at 24kHz
+
 
 ### Tips for Better Voice Conversion
 
 1. **Use longer reference samples**: 5-10 seconds of clean speech works best
 2. **Try multiple reference samples**: Use the secondary reference input for more robust voice profiles
-3. **For diffusion models**:
-   - Try lower diffusion noise values (0.05-0.1) for cleaner output
-   - Increase diffusion steps (30-40) for higher quality (but slower processing)
-4. **Adjust voice mimicry settings**:
+3. **Adjust voice mimicry settings**:
    - Increase voice_match_strength (0.6-0.8) for stronger character matching
    - Use neutralize_source (0.3-0.5) to reduce source voice influence
    - Add presence_boost (0.3-0.5) for more "in the room" sound
