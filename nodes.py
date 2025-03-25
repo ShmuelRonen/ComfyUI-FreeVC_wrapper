@@ -16,12 +16,12 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "noisereduce"])
     import noisereduce as nr
 
-# Add FreeVC directory to path - MODIFY THIS PART
+# Add FreeVC directory to path with higher priority to avoid conflicts
 freevc_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "freevc")
 if freevc_dir not in sys.path:
-    sys.path.insert(0, freevc_dir)  # Changed from append to insert(0)
+    sys.path.insert(0, freevc_dir)  # Insert at beginning to prioritize
 
-# Import FreeVC modules - KEEP THESE AS THEY ARE
+# Import FreeVC modules
 from models import SynthesizerTrn
 from mel_processing import mel_spectrogram_torch
 from speaker_encoder.voice_encoder import SpeakerEncoder
@@ -88,11 +88,11 @@ class HParams():
 
 class FreeVCNode:
     def __init__(self):
-        """Initialize Enhanced FreeVC Node with improved processing."""
+        """Initialize FreeVC Node with improved processing."""
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.models = {}
         self.current_model_type = None
-        print("Enhanced FreeVC Node initialized on device:", self.device)
+        print("FreeVC Node initialized on device:", self.device)
     
     def load_models(self, model_type):
         """
@@ -106,26 +106,14 @@ class FreeVCNode:
             
         print(f"Loading {model_type}...")
         try:
-            # Check if this is a diffusion model variant
-            is_diffusion = model_type.startswith("D-")
-            base_model_type = model_type[2:] if is_diffusion else model_type
-            
             # Handle filenames for different model types
-            if base_model_type == "FreeVC (24kHz)":
-                if is_diffusion:
-                    config_filename = "d-freevc-24.json"
-                    checkpoint_filename = "d-freevc-24.pth"
-                else:
-                    config_filename = "freevc-24.json"
-                    checkpoint_filename = "freevc-24.pth"
+            if model_type == "FreeVC (24kHz)":
+                config_filename = "freevc-24.json"
+                checkpoint_filename = "freevc-24.pth"
             else:
-                base_name = base_model_type.lower().replace(' ', '-')
-                if is_diffusion:
-                    config_filename = f"d-{base_name}.json"
-                    checkpoint_filename = f"d-{base_name}.pth"
-                else:
-                    config_filename = f"{base_name}.json"
-                    checkpoint_filename = f"{base_name}.pth"
+                base_name = model_type.lower().replace(' ', '-')
+                config_filename = f"{base_name}.json"
+                checkpoint_filename = f"{base_name}.pth"
             
             # Print exact filenames for debugging
             print(f"Using config file: {config_filename}")
@@ -162,7 +150,7 @@ class FreeVCNode:
                 print(f"Successfully loaded checkpoint: {checkpoint_filename}")
                 
                 # Load speaker encoder for specific models
-                if base_model_type in ["FreeVC", "FreeVC (24kHz)"]:
+                if model_type in ["FreeVC", "FreeVC (24kHz)"]:
                     print("Loading speaker encoder...")
                     encoder_path = os.path.join(freevc_dir, 'speaker_encoder/ckpt/pretrained_bak_5805000.pt')
                     
@@ -182,21 +170,15 @@ class FreeVCNode:
                     
                     self.models[model_type] = {
                         'model': model,
-                        'speaker_encoder': speaker_encoder,
-                        'is_diffusion': is_diffusion
+                        'speaker_encoder': speaker_encoder
                     }
                 else:
                     self.models[model_type] = {
-                        'model': model,
-                        'is_diffusion': is_diffusion
+                        'model': model
                     }
             except Exception as e:
                 print(f"Error loading {checkpoint_filename}: {str(e)}")
-                if is_diffusion:
-                    print(f"Falling back to standard model: {base_model_type}")
-                    return self.load_models(base_model_type)
-                else:
-                    raise e
+                raise e
                 
             # Load WavLM if not already loaded
             if 'wavlm' not in self.models:
@@ -209,13 +191,7 @@ class FreeVCNode:
             print(f"Error loading models: {str(e)}")
             import traceback
             traceback.print_exc()
-            
-            # Fall back to standard model if diffusion model fails
-            if is_diffusion:
-                print(f"Falling back to standard model: {base_model_type}")
-                return self.load_models(base_model_type)
-            else:
-                raise e
+            raise e
     
     def _preprocess_audio(self, wav, sr, target_sr, noise_reduction_strength=0.5):
         """
@@ -284,14 +260,13 @@ class FreeVCNode:
             reference_audios = [reference_audios]
             
         embeddings = []
-        base_model_type = self.current_model_type[2:] if self.current_model_type.startswith("D-") else self.current_model_type
         
         for ref_audio in reference_audios:
             wav_ref = self._process_audio(ref_audio, target_sr, "reference")
             wav_ref = self._preprocess_audio(wav_ref, target_sr, target_sr, noise_reduction_strength)
             
-            # Get embedding for this reference - Note: use base_model_type for check
-            if base_model_type in ["FreeVC", "FreeVC (24kHz)"]:
+            # Get embedding for this reference
+            if self.current_model_type in ["FreeVC", "FreeVC (24kHz)"]:
                 try:
                     # Make sure speaker encoder exists for current model
                     if 'speaker_encoder' not in self.models[self.current_model_type]:
@@ -355,11 +330,10 @@ class FreeVCNode:
         
     @classmethod
     def INPUT_TYPES(s):
-        """Define enhanced input types for ComfyUI."""
+        """Define input types for ComfyUI."""
         return {
             "required": {
-                "model_type": (["FreeVC", "FreeVC-s", "FreeVC (24kHz)", 
-                               "D-FreeVC", "D-FreeVC-s", "D-FreeVC (24kHz)"],),
+                "model_type": (["FreeVC", "FreeVC-s", "FreeVC (24kHz)"],),
                 "source_audio": ("AUDIO",),
                 "reference_audio": ("AUDIO",)
             },
@@ -368,8 +342,6 @@ class FreeVCNode:
                 "noise_reduction_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.1}),
                 "clarity_enhancement": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 1.0, "step": 0.1}),
                 "temperature": ("FLOAT", {"default": 0.7, "min": 0.1, "max": 1.0, "step": 0.1}),
-                "diffusion_noise_coef": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 0.5, "step": 0.05}),
-                "diffusion_steps": ("INT", {"default": 20, "min": 10, "max": 50, "step": 5}),
                 "normalize_output": ("BOOLEAN", {"default": True}),
                 "normalization_level": ("FLOAT", {"default": 0.95, "min": 0.1, "max": 1.0, "step": 0.05})
             }
@@ -382,7 +354,6 @@ class FreeVCNode:
     def convert_voice_enhanced(self, model_type, source_audio, reference_audio, 
                               secondary_reference=None, noise_reduction_strength=0.5, 
                               clarity_enhancement=0.3, temperature=0.7,
-                              diffusion_noise_coef=0.1, diffusion_steps=20,
                               normalize_output=True, normalization_level=0.95):
         """
         Enhanced voice conversion with multiple references and improved processing
@@ -402,17 +373,11 @@ class FreeVCNode:
             tuple: Audio data in ComfyUI format
         """
         try:
-            print(f"Starting enhanced voice conversion with {model_type}...")
+            print(f"Starting voice conversion with {model_type}...")
             
             self.current_model_type = model_type
             self.load_models(model_type)
             print("Models loaded successfully")
-            
-            # Check if using diffusion model
-            is_diffusion = self.models[model_type].get('is_diffusion', False)
-            base_model_type = model_type[2:] if is_diffusion else model_type
-            
-            print(f"Using {'diffusion-based' if is_diffusion else 'standard'} model: {model_type}")
             
             with torch.no_grad():
                 # Process source audio with enhanced preprocessing
@@ -423,21 +388,13 @@ class FreeVCNode:
                 wav_src = torch.from_numpy(wav_src).unsqueeze(0).to(self.device)
                 
                 # Create reference list and process reference audio(s)
-                if base_model_type in ["FreeVC", "FreeVC (24kHz)"]:
+                if model_type in ["FreeVC", "FreeVC (24kHz)"]:
                     # Process reference embeddings
                     ref_list = [reference_audio]
                     if secondary_reference is not None:
                         ref_list.append(secondary_reference)
                     g_tgt = self._process_multiple_references(ref_list, self.hps.data.sampling_rate, 
                                                              noise_reduction_strength)
-                    
-                    # Safety check - fall back to standard model if we don't get a valid g_tgt
-                    if g_tgt is None and is_diffusion:
-                        print(f"Failed to get speaker embedding. Falling back to standard model: {base_model_type}")
-                        return self.convert_voice_enhanced(base_model_type, source_audio, reference_audio,
-                                                        secondary_reference, noise_reduction_strength,
-                                                        clarity_enhancement, temperature,
-                                                        normalize_output, normalization_level)
                 else:
                     # For FreeVC-s, process the primary reference for mel spectrogram
                     print("Processing reference audio for mel...")
@@ -468,36 +425,18 @@ class FreeVCNode:
                     c = c / temperature
                 c = c.transpose(1, 2)
                 
-                # Convert voice based on model type
-                print(f"Performing voice conversion with {model_type}...")
-                # Apply custom diffusion parameters for diffusion-based models
-                if is_diffusion:
-                    print(f"Using diffusion parameters - noise_coef: {diffusion_noise_coef}, steps: {diffusion_steps}")
-                    if hasattr(self.hps.train, 'diffusion'):
-                        # Temporarily save original settings to restore later
-                        original_noise_coef = self.hps.train.diffusion.get('inference_noise_coef', 0.3)
-                        original_steps = self.hps.train.diffusion.get('diffusion_steps', 50)
-                        
-                        # Apply user settings
-                        self.hps.train.diffusion['inference_noise_coef'] = diffusion_noise_coef
-                        self.hps.train.diffusion['diffusion_steps'] = diffusion_steps
-                
                 # Perform voice conversion based on model type
-                if base_model_type in ["FreeVC", "FreeVC (24kHz)"]:
+                print(f"Performing voice conversion with {model_type}...")
+                if model_type in ["FreeVC", "FreeVC (24kHz)"]:
                     audio = self.models[model_type]['model'].infer(c, g=g_tgt)
                 else:  # FreeVC-s
                     audio = self.models[model_type]['model'].infer(c, mel=mel_tgt)
-                    
-                # Restore original diffusion settings if modified
-                if is_diffusion and self.hps.train.get('diffusion'):
-                    self.hps.train.diffusion['inference_noise_coef'] = original_noise_coef
-                    self.hps.train.diffusion['diffusion_steps'] = original_steps
                 
                 # Process output
                 audio = audio[0][0].data.cpu().float().numpy()
                 
                 # Determine sampling rate
-                sampling_rate = 24000 if base_model_type == "FreeVC (24kHz)" else self.hps.data.sampling_rate
+                sampling_rate = 24000 if model_type == "FreeVC (24kHz)" else self.hps.data.sampling_rate
                 
                 # Apply enhanced post-processing with normalization
                 audio = self._apply_post_processing(
@@ -508,7 +447,7 @@ class FreeVCNode:
                     normalization_level
                 )
                 
-                print("Enhanced voice conversion completed")
+                print("Voice conversion completed")
                 
                 # Return in the same format as input
                 print("Preparing output...")
@@ -519,21 +458,12 @@ class FreeVCNode:
             print(f"Error in voice conversion: {str(e)}")
             import traceback
             traceback.print_exc()
-            
-            # Fall back to standard model if diffusion model fails
-            if is_diffusion:
-                print(f"Falling back to standard model: {base_model_type}")
-                return self.convert_voice_enhanced(base_model_type, source_audio, reference_audio,
-                                                 secondary_reference, noise_reduction_strength,
-                                                 clarity_enhancement, temperature,
-                                                 normalize_output, normalization_level)
-            else:
-                raise e
+            raise e
 
 NODE_CLASS_MAPPINGS = {
     "FreeVC Voice Conversion": FreeVCNode
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "FreeVC Voice Conversion": "FreeVC Voice Converter v2 🎤"
+    "FreeVC Voice Conversion": "FreeVC Voice Converter 🎤"
 }
