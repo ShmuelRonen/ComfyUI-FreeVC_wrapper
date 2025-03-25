@@ -16,10 +16,10 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "noisereduce"])
     import noisereduce as nr
 
-# Add FreeVC directory to path with higher priority to avoid conflicts
+# Add FreeVC directory to path
 freevc_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "freevc")
 if freevc_dir not in sys.path:
-    sys.path.insert(0, freevc_dir)  # Insert at beginning to prioritize
+    sys.path.append(freevc_dir)
 
 # Import FreeVC modules
 from models import SynthesizerTrn
@@ -88,11 +88,11 @@ class HParams():
 
 class FreeVCNode:
     def __init__(self):
-        """Initialize FreeVC Node with improved processing."""
+        """Initialize Enhanced FreeVC Node with improved processing."""
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.models = {}
         self.current_model_type = None
-        print("FreeVC Node initialized on device:", self.device)
+        print("Enhanced FreeVC Node initialized on device:", self.device)
     
     def load_models(self, model_type):
         """
@@ -111,21 +111,11 @@ class FreeVCNode:
                 config_filename = "freevc-24.json"
                 checkpoint_filename = "freevc-24.pth"
             else:
-                base_name = model_type.lower().replace(' ', '-')
-                config_filename = f"{base_name}.json"
-                checkpoint_filename = f"{base_name}.pth"
-            
-            # Print exact filenames for debugging
-            print(f"Using config file: {config_filename}")
-            print(f"Using checkpoint file: {checkpoint_filename}")
+                config_filename = f"{model_type.lower().replace(' ', '-')}.json"
+                checkpoint_filename = f"{model_type.lower().replace(' ', '-')}.pth"
             
             config_path = os.path.join(freevc_dir, "configs", config_filename)
             print(f"Loading config from: {config_path}")
-            
-            # Check if config file exists
-            if not os.path.exists(config_path):
-                raise FileNotFoundError(f"Config file not found: {config_path}")
-                
             self.hps = load_config(config_path)
             
             # Initialize synthesis model
@@ -139,47 +129,21 @@ class FreeVCNode:
             # Load checkpoint
             checkpoint_path = os.path.join(freevc_dir, "checkpoints", checkpoint_filename)
             print(f"Loading checkpoint from: {checkpoint_path}")
+            model, _, _ = load_checkpoint(checkpoint_path, model)
             
-            # Check if checkpoint file exists
-            if not os.path.exists(checkpoint_path):
-                raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
+            # Load speaker encoder for specific models
+            if model_type in ["FreeVC", "FreeVC (24kHz)"]:
+                print("Loading speaker encoder...")
+                speaker_encoder = SpeakerEncoder(os.path.join(freevc_dir, 'speaker_encoder/ckpt/pretrained_bak_5805000.pt'))
+                self.models[model_type] = {
+                    'model': model,
+                    'speaker_encoder': speaker_encoder
+                }
+            else:
+                self.models[model_type] = {
+                    'model': model
+                }
             
-            # Try to load the checkpoint
-            try:
-                model, _, _ = load_checkpoint(checkpoint_path, model)
-                print(f"Successfully loaded checkpoint: {checkpoint_filename}")
-                
-                # Load speaker encoder for specific models
-                if model_type in ["FreeVC", "FreeVC (24kHz)"]:
-                    print("Loading speaker encoder...")
-                    encoder_path = os.path.join(freevc_dir, 'speaker_encoder/ckpt/pretrained_bak_5805000.pt')
-                    
-                    # Check if speaker encoder exists
-                    if not os.path.exists(encoder_path):
-                        raise FileNotFoundError(f"Speaker encoder checkpoint not found: {encoder_path}")
-                        
-                    start_time = torch.cuda.Event(enable_timing=True)
-                    end_time = torch.cuda.Event(enable_timing=True)
-                    start_time.record()
-                    
-                    speaker_encoder = SpeakerEncoder(encoder_path)
-                    
-                    end_time.record()
-                    torch.cuda.synchronize()
-                    print(f"Loaded the voice encoder model on {self.device} in {start_time.elapsed_time(end_time)/1000:.2f} seconds.")
-                    
-                    self.models[model_type] = {
-                        'model': model,
-                        'speaker_encoder': speaker_encoder
-                    }
-                else:
-                    self.models[model_type] = {
-                        'model': model
-                    }
-            except Exception as e:
-                print(f"Error loading {checkpoint_filename}: {str(e)}")
-                raise e
-                
             # Load WavLM if not already loaded
             if 'wavlm' not in self.models:
                 print("Loading WavLM...")
@@ -189,8 +153,6 @@ class FreeVCNode:
                 
         except Exception as e:
             print(f"Error loading models: {str(e)}")
-            import traceback
-            traceback.print_exc()
             raise e
     
     def _preprocess_audio(self, wav, sr, target_sr, noise_reduction_strength=0.5):
@@ -267,17 +229,8 @@ class FreeVCNode:
             
             # Get embedding for this reference
             if self.current_model_type in ["FreeVC", "FreeVC (24kHz)"]:
-                try:
-                    # Make sure speaker encoder exists for current model
-                    if 'speaker_encoder' not in self.models[self.current_model_type]:
-                        print(f"Warning: Speaker encoder not found for {self.current_model_type}")
-                        continue
-                        
-                    print(f"Getting speaker embedding for {self.current_model_type}")
-                    ref_embed = self.models[self.current_model_type]['speaker_encoder'].embed_utterance(wav_ref)
-                    embeddings.append(ref_embed)
-                except Exception as e:
-                    print(f"Error getting speaker embedding: {str(e)}")
+                ref_embed = self.models[self.current_model_type]['speaker_encoder'].embed_utterance(wav_ref)
+                embeddings.append(ref_embed)
                 
         # Average the embeddings
         if embeddings:
@@ -285,9 +238,6 @@ class FreeVCNode:
             # Re-normalize the averaged embedding
             avg_embed = avg_embed / np.linalg.norm(avg_embed, 2)
             return torch.from_numpy(avg_embed).unsqueeze(0).to(self.device)
-            
-        # If we get here with no embeddings, something went wrong
-        print("WARNING: No embeddings generated from reference audio. This will cause errors.")
         return None
     
     def _apply_post_processing(self, audio, sampling_rate, clarity_enhancement=0.3, normalize_output=True, normalization_level=0.95):
@@ -330,7 +280,7 @@ class FreeVCNode:
         
     @classmethod
     def INPUT_TYPES(s):
-        """Define input types for ComfyUI."""
+        """Define enhanced input types for ComfyUI."""
         return {
             "required": {
                 "model_type": (["FreeVC", "FreeVC-s", "FreeVC (24kHz)"],),
@@ -373,7 +323,8 @@ class FreeVCNode:
             tuple: Audio data in ComfyUI format
         """
         try:
-            print(f"Starting voice conversion with {model_type}...")
+            print("Starting enhanced voice conversion...")
+            print(f"Processing with model: {model_type}")
             
             self.current_model_type = model_type
             self.load_models(model_type)
@@ -425,8 +376,8 @@ class FreeVCNode:
                     c = c / temperature
                 c = c.transpose(1, 2)
                 
-                # Perform voice conversion based on model type
-                print(f"Performing voice conversion with {model_type}...")
+                # Convert voice based on model type
+                print(f"Performing enhanced voice conversion with {model_type}...")
                 if model_type in ["FreeVC", "FreeVC (24kHz)"]:
                     audio = self.models[model_type]['model'].infer(c, g=g_tgt)
                 else:  # FreeVC-s
@@ -447,7 +398,7 @@ class FreeVCNode:
                     normalization_level
                 )
                 
-                print("Voice conversion completed")
+                print("Enhanced voice conversion completed")
                 
                 # Return in the same format as input
                 print("Preparing output...")
