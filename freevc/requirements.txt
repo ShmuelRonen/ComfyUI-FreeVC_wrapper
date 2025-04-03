@@ -1,0 +1,8 @@
+altair
+httpx==0.24.1
+numpy
+scipy
+torch
+transformers
+librosa
+webrtcvad==2.0.10
