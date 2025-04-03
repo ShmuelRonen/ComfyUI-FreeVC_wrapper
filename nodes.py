@@ -16,15 +16,25 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "noisereduce"])
     import noisereduce as nr
 
-# Add FreeVC directory to path
-freevc_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "freevc")
-if freevc_dir not in sys.path:
-    sys.path.append(freevc_dir)
+# Add FreeVC directory directly to sys.path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+freevc_dir = os.path.join(current_dir, "freevc")
+if not os.path.exists(freevc_dir):
+    raise ImportError(f"FreeVC repository not found at {freevc_dir}. Please clone it with: git clone https://github.com/ShmuelRonen/FreeVC.git {freevc_dir}")
 
-# Import FreeVC modules
-from models import SynthesizerTrn
-from mel_processing import mel_spectrogram_torch
-from speaker_encoder.voice_encoder import SpeakerEncoder
+# Add to Python path
+sys.path.insert(0, freevc_dir)
+
+# Now import the modules directly (without the freevc prefix)
+try:
+    from models import SynthesizerTrn
+    from mel_processing import mel_spectrogram_torch
+    from speaker_encoder.voice_encoder import SpeakerEncoder
+except ImportError as e:
+    print(f"Error importing FreeVC modules: {e}")
+    print(f"Current sys.path: {sys.path}")
+    print(f"Contents of freevc directory: {os.listdir(freevc_dir) if os.path.exists(freevc_dir) else 'Directory not found'}")
+    raise
 
 # Reuse the existing utility functions
 def load_config(config_path):
